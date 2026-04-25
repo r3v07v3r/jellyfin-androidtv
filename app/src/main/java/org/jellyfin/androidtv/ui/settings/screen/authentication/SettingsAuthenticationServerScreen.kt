@@ -20,6 +20,7 @@ import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.auth.repository.AuthenticationRepository
 import org.jellyfin.androidtv.auth.repository.ServerRepository
 import org.jellyfin.androidtv.auth.repository.ServerUserRepository
+import org.jellyfin.androidtv.cloudflare.CloudflareAccessAuthManager
 import org.jellyfin.androidtv.ui.base.Icon
 import org.jellyfin.androidtv.ui.base.ProfilePicture
 import org.jellyfin.androidtv.ui.base.Text
@@ -44,6 +45,7 @@ fun SettingsAuthenticationServerScreen(serverId: UUID) {
 	val serverRepository = koinInject<ServerRepository>()
 	val serverUserRepository = koinInject<ServerUserRepository>()
 	val authenticationRepository = koinInject<AuthenticationRepository>()
+	val cloudflareAccessAuthManager = koinInject<CloudflareAccessAuthManager>()
 
 	LaunchedEffect(serverRepository) { serverRepository.loadStoredServers() }
 
@@ -103,6 +105,17 @@ fun SettingsAuthenticationServerScreen(serverId: UUID) {
 		}
 
 		item { ListSection(headingContent = { Text(stringResource(R.string.lbl_server)) }) }
+
+		item {
+			ListButton(
+				leadingContent = { Icon(painterResource(R.drawable.ic_delete), contentDescription = null) },
+				headingContent = { Text(stringResource(R.string.cloudflare_access_clear_session)) },
+				captionContent = { Text(stringResource(R.string.cloudflare_access_sign_in_required)) },
+				onClick = {
+					server?.address?.let(cloudflareAccessAuthManager::clearCookies)
+				}
+			)
+		}
 
 		item {
 			ListButton(
