@@ -8,3 +8,4 @@ sealed class ServerAdditionState
 data class ConnectingState(val address: String) : ServerAdditionState()
 data class UnableToConnectState(val addressCandidates: Map<String, Collection<RecommendedServerIssue>>) : ServerAdditionState()
 data class ConnectedState(val id: UUID, val publicInfo: PublicSystemInfo) : ServerAdditionState()
+data class CloudflareAccessRequiredState(val serverUrl: String, val loginUrl: String) : ServerAdditionState()

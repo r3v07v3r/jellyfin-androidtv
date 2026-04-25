@@ -6,6 +6,8 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import androidx.core.os.bundleOf
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.add
 import androidx.fragment.app.commit
@@ -16,8 +18,10 @@ import kotlinx.coroutines.flow.onEach
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.auth.model.ConnectedState
 import org.jellyfin.androidtv.auth.model.ConnectingState
+import org.jellyfin.androidtv.auth.model.CloudflareAccessRequiredState
 import org.jellyfin.androidtv.auth.model.UnableToConnectState
 import org.jellyfin.androidtv.databinding.FragmentServerAddBinding
+import org.jellyfin.androidtv.ui.cloudflare.CloudflareAccessLoginActivity
 import org.jellyfin.androidtv.ui.startup.ServerAddViewModel
 import org.jellyfin.androidtv.util.getSummary
 import org.koin.androidx.viewmodel.ext.android.viewModel
@@ -28,8 +32,14 @@ class ServerAddFragment : Fragment() {
 	}
 
 	private val startupViewModel: ServerAddViewModel by viewModel()
+	private var pendingServerAddress: String? = null
 	private var _binding: FragmentServerAddBinding? = null
 	private val binding get() = _binding!!
+	private val cloudflareLoginLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+		if (result.resultCode == android.app.Activity.RESULT_OK) {
+			pendingServerAddress?.let(startupViewModel::addServer)
+		}
+	}
 
 	private val serverAddressArgument get() = arguments?.getString(ARG_SERVER_ADDRESS)?.ifBlank { null }
 
@@ -70,6 +80,7 @@ class ServerAddFragment : Fragment() {
 		startupViewModel.state.onEach { state ->
 			when (state) {
 				is ConnectingState -> {
+					pendingServerAddress = state.address
 					// Disable form
 					binding.address.isEnabled = false
 					binding.confirm.isEnabled = false
@@ -102,6 +113,27 @@ class ServerAddFragment : Fragment() {
 					)
 				}
 
+				is CloudflareAccessRequiredState -> {
+					binding.address.isEnabled = true
+					binding.confirm.isEnabled = true
+					binding.error.text = getString(R.string.cloudflare_access_sign_in_required)
+
+					AlertDialog.Builder(requireContext())
+						.setTitle(R.string.cloudflare_access_sign_in_required)
+						.setMessage(R.string.cloudflare_access_server_protected)
+						.setNegativeButton(android.R.string.cancel, null)
+						.setPositiveButton(R.string.cloudflare_access_sign_in) { _, _ ->
+							cloudflareLoginLauncher.launch(
+								CloudflareAccessLoginActivity.createIntent(
+									requireContext(),
+									state.serverUrl,
+									state.loginUrl,
+								)
+							)
+						}
+						.show()
+				}
+
 				null -> Unit
 			}
 		}.launchIn(lifecycleScope)
@@ -114,7 +146,10 @@ class ServerAddFragment : Fragment() {
 	}
 
 	private fun submitAddress() = when {
-		binding.address.text.isNotBlank() -> startupViewModel.addServer(binding.address.text.toString())
+		binding.address.text.isNotBlank() -> {
+			pendingServerAddress = binding.address.text.toString()
+			startupViewModel.addServer(binding.address.text.toString())
+		}
 		else -> binding.error.setText(R.string.server_field_empty)
 	}
 }
