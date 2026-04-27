@@ -6,9 +6,11 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.os.bundleOf
 import androidx.core.view.isGone
 import androidx.core.view.isVisible
+import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.add
 import androidx.fragment.app.commit
@@ -21,6 +23,8 @@ import androidx.recyclerview.widget.RecyclerView
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.auth.model.ApiClientErrorLoginState
 import org.jellyfin.androidtv.auth.model.AuthenticatedState
@@ -37,6 +41,7 @@ import org.jellyfin.androidtv.auth.repository.ServerUserRepository
 import org.jellyfin.androidtv.cloudflare.CloudflareAccessAuthManager
 import org.jellyfin.androidtv.data.service.BackgroundService
 import org.jellyfin.androidtv.databinding.FragmentServerBinding
+import org.jellyfin.androidtv.ui.cloudflare.CloudflareAccessLoginActivity
 import org.jellyfin.androidtv.ui.ServerButtonView
 import org.jellyfin.androidtv.ui.card.UserCardView
 import org.jellyfin.androidtv.ui.startup.StartupViewModel
@@ -59,6 +64,13 @@ class ServerFragment : Fragment() {
 	private val backgroundService: BackgroundService by inject()
 	private var _binding: FragmentServerBinding? = null
 	private val binding get() = _binding!!
+	private val cloudflareLoginLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+		if (result.resultCode == android.app.Activity.RESULT_OK) {
+			serverIdArgument
+				?.let(startupViewModel::getServer)
+				?.let(startupViewModel::loadUsers)
+		}
+	}
 
 	private val serverIdArgument get() = arguments?.getString(ARG_SERVER_ID)?.ifBlank { null }?.toUUIDOrNull()
 
@@ -88,7 +100,7 @@ class ServerFragment : Fragment() {
 					ServerUnavailableState,
 					is ApiClientErrorLoginState -> {
 						if (cloudflareAccessAuthManager.consumeSessionExpired(server.address)) {
-							Toast.makeText(context, R.string.cloudflare_access_session_expired, Toast.LENGTH_LONG).show()
+							promptCloudflareReauthentication(server)
 						} else {
 							Toast.makeText(context, R.string.server_connection_failed, Toast.LENGTH_LONG).show()
 						}
@@ -130,6 +142,31 @@ class ServerFragment : Fragment() {
 		}
 
 		return binding.root
+	}
+
+	private fun promptCloudflareReauthentication(server: Server) {
+		Toast.makeText(context, R.string.cloudflare_access_session_expired, Toast.LENGTH_LONG).show()
+
+		viewLifecycleOwner.lifecycleScope.launch {
+			val challenge = withContext(Dispatchers.IO) {
+				cloudflareAccessAuthManager.startLoginFlow(server.address)
+			}
+			val loginUrl = challenge?.loginUrl ?: server.address
+			AlertDialog.Builder(requireContext())
+				.setTitle(R.string.cloudflare_access_sign_in_required)
+				.setMessage(R.string.cloudflare_access_session_expired)
+				.setNegativeButton(android.R.string.cancel, null)
+				.setPositiveButton(R.string.cloudflare_access_sign_in) { _, _ ->
+					cloudflareLoginLauncher.launch(
+						CloudflareAccessLoginActivity.createIntent(
+							requireContext(),
+							server.address,
+							loginUrl,
+						)
+					)
+				}
+				.show()
+		}
 	}
 
 	override fun onDestroyView() {
