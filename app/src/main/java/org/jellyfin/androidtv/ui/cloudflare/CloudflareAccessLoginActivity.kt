@@ -12,6 +12,7 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.net.toUri
 import org.jellyfin.androidtv.cloudflare.CloudflareAccessAuthManager
 import org.jellyfin.androidtv.databinding.ActivityCloudflareAccessLoginBinding
 import org.koin.android.ext.android.inject
@@ -78,7 +79,7 @@ class CloudflareAccessLoginActivity : AppCompatActivity() {
 		}
 	}
 
-	private fun isAllowedNavigation(url: String): Boolean = isAllowedNavigation(Uri.parse(url))
+	private fun isAllowedNavigation(url: String): Boolean = isAllowedNavigation(url.toUri())
 
 	private fun isAllowedNavigation(uri: Uri): Boolean {
 		return uri.scheme.equals("https", ignoreCase = true)
