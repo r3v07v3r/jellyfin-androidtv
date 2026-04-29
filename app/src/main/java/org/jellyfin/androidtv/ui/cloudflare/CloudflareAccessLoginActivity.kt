@@ -48,8 +48,14 @@ class CloudflareAccessLoginActivity : AppCompatActivity() {
 
 			override fun onPageFinished(view: WebView?, url: String?) {
 				super.onPageFinished(view, url)
-				val cookieHeader = cookieManager.getCookie(serverUrl).orEmpty()
-				if (cookieHeader.contains("CF_Authorization=", ignoreCase = true)) {
+				val cookieHeader = sequenceOf(
+					cookieManager.getCookie(serverUrl),
+					url?.let(cookieManager::getCookie),
+				)
+					.filterNotNull()
+					.firstOrNull { it.contains("CF_Authorization=", ignoreCase = true) }
+					.orEmpty()
+				if (cookieHeader.isNotBlank()) {
 					cloudflareAccessAuthManager.saveCookieHeader(serverUrl, cookieHeader)
 					setResult(Activity.RESULT_OK)
 					finish()
