@@ -17,6 +17,7 @@ import org.acra.sender.ReportSenderException
 import org.acra.sender.ReportSenderFactory
 import org.jellyfin.androidtv.BuildConfig
 import org.jellyfin.androidtv.R
+import org.jellyfin.androidtv.cloudflare.CloudflareAccessAuthManager
 import org.jellyfin.androidtv.preference.TelemetryPreferences
 import org.jellyfin.androidtv.util.appendCodeBlock
 import org.jellyfin.androidtv.util.appendItem
@@ -60,6 +61,7 @@ object TelemetryService {
 		private val url: String?,
 		private val token: String?,
 		private val includeLogs: Boolean,
+		private val cloudflareCookieHeader: String?,
 	) : ReportSender {
 		override fun send(context: Context, errorContent: CrashReportData) = try {
 			if (url.isNullOrBlank()) throw ReportSenderException("No telemetry crash report URL available.")
@@ -80,6 +82,9 @@ object TelemetryService {
 				accessToken = token,
 			)
 			connection.setRequestProperty("Authorization", authorization)
+			if (!cloudflareCookieHeader.isNullOrBlank()) {
+				connection.setRequestProperty("Cookie", cloudflareCookieHeader)
+			}
 			// Write POST body
 			connection.requestMethod = "POST"
 			connection.doOutput = true
@@ -153,8 +158,11 @@ object TelemetryService {
 			val url = preferences?.getString(TelemetryPreferences.crashReportUrl.key, null)
 			val token = preferences?.getString(TelemetryPreferences.crashReportToken.key, null)
 			val includeLogs = preferences?.getBoolean(TelemetryPreferences.crashReportIncludeLogs.key, true) ?: true
+			val cloudflareCookieHeader = url?.let { reportUrl ->
+				CloudflareAccessAuthManager(context).getCookieHeader(reportUrl)
+			}
 
-			return AcraReportSender(url, token, includeLogs)
+			return AcraReportSender(url, token, includeLogs, cloudflareCookieHeader)
 		}
 	}
 }

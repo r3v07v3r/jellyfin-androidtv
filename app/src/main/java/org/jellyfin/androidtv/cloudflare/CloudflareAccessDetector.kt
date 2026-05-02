@@ -4,6 +4,8 @@ import okhttp3.Headers
 import okhttp3.HttpUrl
 
 object CloudflareAccessDetector {
+	private const val CLOUDFLARE_ACCESS_MARKER = "cloudflare access"
+	private const val CLOUDFLARE_LOGIN_MARKER = "cdn-cgi/access"
 	private const val HTTP_STATUS_UNAUTHORIZED = 401
 	private const val HTTP_STATUS_FORBIDDEN = 403
 	private const val HTTP_STATUS_FOUND = 302
@@ -24,11 +26,13 @@ object CloudflareAccessDetector {
 		headers: Headers,
 		bodySnippet: String? = null,
 	): Boolean {
+		if (statusCode in 302..303) {
 		if (statusCode in HTTP_STATUS_FOUND..HTTP_STATUS_SEE_OTHER) {
 			val location = headers["Location"].orEmpty().lowercase()
 			if (location.contains(CLOUDFLARE_LOGIN_MARKER) || location.contains("cloudflareaccess.com")) return true
 		}
 
+		if (statusCode !in setOf(401, 403) && !hasCloudflareHeaders(headers)) return false
 		if (statusCode !in ACCESS_CHALLENGE_STATUS_CODES && !hasCloudflareHeaders(headers)) return false
 
 		if (!isLikelyJellyfinPath(requestUrl.encodedPath)) {
@@ -44,6 +48,7 @@ object CloudflareAccessDetector {
 		headers: Headers,
 		bodySnippet: String? = null,
 	): Boolean {
+		if (statusCode !in setOf(401, 403, 302, 303)) return false
 		if (statusCode !in EXPIRED_SESSION_STATUS_CODES) return false
 		return isCloudflareAccessChallenge(requestUrl, statusCode, headers, bodySnippet)
 	}

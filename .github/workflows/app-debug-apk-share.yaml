@@ -40,6 +40,7 @@ jobs:
       - name: Prepare artifact
         run: |
           mkdir -p build/gh-debug-apk/
+          cp app/build/outputs/apk/debug/app-debug.apk build/gh-debug-apk/
           apk_path="$(find app/build/outputs/apk -type f -name '*debug*.apk' | sort | head -n 1)"
           if [ -z "$apk_path" ]; then
             echo "No debug APK found under app/build/outputs/apk"
@@ -54,4 +55,5 @@ jobs:
           name: jellyfin-androidtv-debug-apk
           retention-days: 30
           if-no-files-found: error
+          path: build/gh-debug-apk/app-debug.apk
           path: build/gh-debug-apk/jellyfin-androidtv-debug.apk
