@@ -152,7 +152,6 @@ class ServerFragment : Fragment() {
 				cloudflareAccessAuthManager.startLoginFlow(server.address)
 			}
 			val loginUrl = challenge?.loginUrl ?: server.address
-			if (!isAdded) return@launch
 			AlertDialog.Builder(requireContext())
 				.setTitle(R.string.cloudflare_access_sign_in_required)
 				.setMessage(R.string.cloudflare_access_session_expired)
