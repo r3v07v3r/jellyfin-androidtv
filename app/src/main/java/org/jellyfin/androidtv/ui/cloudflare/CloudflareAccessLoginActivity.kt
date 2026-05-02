@@ -13,6 +13,22 @@ import org.jellyfin.androidtv.cloudflare.CloudflareAccessAuthManager
 import org.jellyfin.androidtv.databinding.ActivityCloudflareAccessLoginBinding
 import org.koin.android.ext.android.inject
 import timber.log.Timber
+import android.annotation.SuppressLint
+import android.app.Activity
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.Bundle
+import android.webkit.CookieManager
+import android.webkit.WebResourceRequest
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.net.toUri
+import org.jellyfin.androidtv.cloudflare.CloudflareAccessAuthManager
+import org.jellyfin.androidtv.databinding.ActivityCloudflareAccessLoginBinding
+import org.koin.android.ext.android.inject
 
 class CloudflareAccessLoginActivity : AppCompatActivity() {
 	private lateinit var binding: ActivityCloudflareAccessLoginBinding
@@ -27,6 +43,7 @@ class CloudflareAccessLoginActivity : AppCompatActivity() {
 		serverUrl = intent.getStringExtra(EXTRA_SERVER_URL).orEmpty()
 		val loginUrl = intent.getStringExtra(EXTRA_LOGIN_URL)
 		if (serverUrl.isBlank() || loginUrl.isNullOrBlank()) {
+		if (serverUrl.isBlank() || loginUrl.isNullOrBlank() || !isAllowedNavigation(loginUrl)) {
 			setResult(Activity.RESULT_CANCELED)
 			finish()
 			return
@@ -52,6 +69,26 @@ class CloudflareAccessLoginActivity : AppCompatActivity() {
 					runCatching {
 						cloudflareAccessAuthManager.saveCookieHeader(serverUrl, cookieHeader)
 					}.onFailure { Timber.w(it, "Failed saving Cloudflare cookie header for %s", serverUrl) }
+			setAcceptThirdPartyCookies(binding.webview, false)
+		}
+
+		configureWebView()
+		binding.webview.webViewClient = object : WebViewClient() {
+			override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+				return request?.url?.let { !isAllowedNavigation(it) } ?: true
+			}
+
+			override fun onPageFinished(view: WebView?, url: String?) {
+				super.onPageFinished(view, url)
+				val cookieHeader = sequenceOf(
+					cookieManager.getCookie(serverUrl),
+					url?.let(cookieManager::getCookie),
+				)
+					.filterNotNull()
+					.firstOrNull { it.contains("CF_Authorization=", ignoreCase = true) }
+					.orEmpty()
+				if (cookieHeader.isNotBlank()) {
+					cloudflareAccessAuthManager.saveCookieHeader(serverUrl, cookieHeader)
 					setResult(Activity.RESULT_OK)
 					finish()
 				}
@@ -105,6 +142,24 @@ class CloudflareAccessLoginActivity : AppCompatActivity() {
 		fun saveEmail(email: String) {
 			cloudflareAccessAuthManager.saveLastEmail(serverUrl, email)
 		}
+	@SuppressLint("SetJavaScriptEnabled")
+	private fun configureWebView() {
+		with(binding.webview.settings) {
+			// Cloudflare Access and common identity providers require JavaScript for the login challenge.
+			javaScriptEnabled = true
+			domStorageEnabled = true
+			allowFileAccess = false
+			allowContentAccess = false
+			javaScriptCanOpenWindowsAutomatically = false
+			setSupportMultipleWindows(false)
+			mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+		}
+	}
+
+	private fun isAllowedNavigation(url: String): Boolean = isAllowedNavigation(url.toUri())
+
+	private fun isAllowedNavigation(uri: Uri): Boolean {
+		return uri.scheme.equals("https", ignoreCase = true)
 	}
 
 	companion object {

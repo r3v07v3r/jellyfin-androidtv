@@ -3,6 +3,8 @@ package org.jellyfin.androidtv.cloudflare
 import android.content.Context
 import android.content.SharedPreferences
 import android.net.Uri
+import androidx.core.content.edit
+import androidx.core.net.toUri
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -21,6 +23,7 @@ import java.io.IOException
 class CloudflareAccessAuthManager(context: Context) {
 	private val preferences: SharedPreferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
 	private val json = Json { ignoreUnknownKeys = true }
+	private val cookieStore = CloudflareAccessCookieStore(preferences)
 	private val probeClient = OkHttpClient.Builder().followRedirects(false).followSslRedirects(false).build()
 
 	private val cookieJar = object : CookieJar {
@@ -65,6 +68,8 @@ class CloudflareAccessAuthManager(context: Context) {
 			val bodySnippet = rawResponse.peekBody(MAX_CHALLENGE_BODY_BYTES).string()
 			val challenge = detectAccessChallenge(
 				url = probeUrl.toString(),
+			val challenge = CloudflareAccessDetector.isCloudflareAccessChallenge(
+				requestUrl = probeUrl,
 				statusCode = rawResponse.code,
 				headers = rawResponse.headers,
 				bodySnippet = bodySnippet,
@@ -92,12 +97,16 @@ class CloudflareAccessAuthManager(context: Context) {
 		val parsedUrl = serverUrl.toNormalizedHttpUrlOrNull() ?: return
 		val accessCookie = cookies.firstOrNull { it.name.equals(CF_AUTHORIZATION, ignoreCase = true) } ?: return
 		saveCookie(parsedUrl.host, accessCookie)
+	fun saveCookies(serverUrl: String, cookies: List<Cookie>) {
+		val parsedUrl = serverUrl.toNormalizedHttpUrlOrNull() ?: return
+		cookieStore.saveCookies(parsedUrl.host, cookies)
 	}
 
 	fun saveCookieHeader(serverUrl: String, cookieHeader: String) {
 		val parsedUrl = serverUrl.toNormalizedHttpUrlOrNull() ?: return
 		val cookie = parseCookieHeader(cookieHeader, parsedUrl.host) ?: return
 		saveCookie(parsedUrl.host, cookie)
+		cookieStore.saveCookieHeader(parsedUrl.host, cookieHeader)
 	}
 
 	fun getCookiesForServer(serverUrl: String): List<Cookie> {
@@ -105,6 +114,84 @@ class CloudflareAccessAuthManager(context: Context) {
 		val session = getStoredSession(parsedUrl.host) ?: return emptyList()
 		if (session.isExpired) {
 			clearCookies(serverUrl)
+		return cookieStore.getCookies(parsedUrl.host)
+	}
+
+	fun getCookieHeader(serverUrl: String): String? {
+		val parsedUrl = serverUrl.toNormalizedHttpUrlOrNull() ?: return null
+		return cookieStore.getCookieHeader(parsedUrl.host)
+	}
+
+	fun clearCookies(serverUrl: String) {
+		val parsedUrl = serverUrl.toNormalizedHttpUrlOrNull() ?: return
+		cookieStore.clear(parsedUrl.host)
+	}
+
+	fun isAccessCookieAvailable(serverUrl: String): Boolean {
+		val parsedUrl = serverUrl.toNormalizedHttpUrlOrNull() ?: return false
+		return cookieStore.hasCookies(parsedUrl.host)
+	}
+
+	fun markSessionExpired(serverUrl: String) {
+		val parsedUrl = serverUrl.toNormalizedHttpUrlOrNull() ?: return
+		preferences.edit { putBoolean(expiredKey(parsedUrl.host), true) }
+	}
+
+	fun consumeSessionExpired(serverUrl: String): Boolean {
+		val parsedUrl = serverUrl.toNormalizedHttpUrlOrNull() ?: return false
+		val key = expiredKey(parsedUrl.host)
+		val expired = preferences.getBoolean(key, false)
+		if (expired) preferences.edit { remove(key) }
+		return expired
+	}
+
+	private fun handleResponse(requestUrl: HttpUrl, response: Response) {
+		if (!isAccessCookieAvailable(requestUrl.toString())) return
+
+		val bodySnippet = response.peekBody(MAX_CHALLENGE_BODY_BYTES).string()
+		val expired = CloudflareAccessDetector.isExpiredSessionChallenge(
+			requestUrl = requestUrl,
+			statusCode = response.code,
+			headers = response.headers,
+			bodySnippet = bodySnippet,
+		)
+		if (expired) {
+			Timber.w("Cloudflare Access session expired for host=%s", requestUrl.host)
+			clearCookies(requestUrl.toString())
+			markSessionExpired(requestUrl.toString())
+		}
+	}
+
+	private fun expiredKey(host: String) = "expired:$host"
+
+	data class CloudflareAccessChallenge(
+		val serverUrl: String,
+		val loginUrl: String,
+	)
+
+	companion object {
+		private const val PREFERENCES_NAME = "cloudflare_access"
+		private const val MAX_CHALLENGE_BODY_BYTES = 2048L
+	}
+}
+
+private class CloudflareAccessCookieStore(private val preferences: SharedPreferences) {
+	private val json = Json { ignoreUnknownKeys = true }
+
+	fun saveCookies(host: String, cookies: List<Cookie>) {
+		val accessCookie = cookies.firstOrNull { it.name.equals(CF_AUTHORIZATION, ignoreCase = true) } ?: return
+		saveCookie(host, accessCookie)
+	}
+
+	fun saveCookieHeader(host: String, cookieHeader: String) {
+		val cookie = parseCookieHeader(cookieHeader, host) ?: return
+		saveCookie(host, cookie)
+	}
+
+	fun getCookies(host: String): List<Cookie> {
+		val session = getStoredSession(host) ?: return emptyList()
+		if (session.isExpired) {
+			clear(host)
 			return emptyList()
 		}
 
@@ -113,6 +200,7 @@ class CloudflareAccessAuthManager(context: Context) {
 				.name(session.name)
 				.value(session.value)
 				.domain(parsedUrl.host)
+				.domain(host)
 				.path(session.path)
 				.apply { if (session.secure) secure() }
 				.apply { if (session.httpOnly) httpOnly() }
@@ -123,6 +211,8 @@ class CloudflareAccessAuthManager(context: Context) {
 
 	fun getCookieHeader(serverUrl: String): String? {
 		val cookies = getCookiesForServer(serverUrl)
+	fun getCookieHeader(host: String): String? {
+		val cookies = getCookies(host)
 		if (cookies.isEmpty()) return null
 		return cookies.joinToString(separator = "; ") { "${it.name}=${it.value}" }
 	}
@@ -158,6 +248,11 @@ class CloudflareAccessAuthManager(context: Context) {
 		if (expired) preferences.edit().remove(key).apply()
 		return expired
 	}
+	fun clear(host: String) {
+		preferences.edit { remove(cookieKey(host)) }
+	}
+
+	fun hasCookies(host: String): Boolean = getCookies(host).isNotEmpty()
 
 	private fun saveCookie(host: String, cookie: Cookie) {
 		val serialized = StoredAccessCookie(
@@ -169,6 +264,7 @@ class CloudflareAccessAuthManager(context: Context) {
 			httpOnly = cookie.httpOnly,
 		)
 		preferences.edit().putString(cookieKey(host), json.encodeToString(serialized)).apply()
+		preferences.edit { putString(cookieKey(host), json.encodeToString(serialized)) }
 		Timber.i("Stored Cloudflare Access cookie for host=%s", host)
 	}
 
@@ -221,6 +317,7 @@ class CloudflareAccessAuthManager(context: Context) {
 	private fun cookieKey(host: String) = "cookie:$host"
 	private fun expiredKey(host: String) = "expired:$host"
 	private fun emailKey(host: String) = "email:$host"
+	private fun cookieKey(host: String) = "cookie:$host"
 
 	@Serializable
 	private data class StoredAccessCookie(
@@ -244,4 +341,12 @@ class CloudflareAccessAuthManager(context: Context) {
 		private const val CF_AUTHORIZATION = "CF_Authorization"
 		private const val MAX_CHALLENGE_BODY_BYTES = 2048L
 	}
+}
+	companion object {
+		private const val CF_AUTHORIZATION = "CF_Authorization"
+	}
+}
+
+private fun String.toNormalizedHttpUrlOrNull(): HttpUrl? {
+	return toUri().toString().toHttpUrlOrNull()
 }
