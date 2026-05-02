@@ -16,6 +16,7 @@ import org.jellyfin.androidtv.BuildConfig
 import org.jellyfin.androidtv.auth.repository.ServerRepository
 import org.jellyfin.androidtv.auth.repository.UserRepository
 import org.jellyfin.androidtv.auth.repository.UserRepositoryImpl
+import org.jellyfin.androidtv.cloudflare.CloudflareAccessAuthManager
 import org.jellyfin.androidtv.data.eventhandling.SocketHandler
 import org.jellyfin.androidtv.data.model.DataRefreshService
 import org.jellyfin.androidtv.data.repository.CustomMessageRepository
@@ -71,7 +72,15 @@ val defaultDeviceInfo = named("defaultDeviceInfo")
 val appModule = module {
 	// SDK
 	single(defaultDeviceInfo) { androidDevice(get()) }
-	single { OkHttpFactory() }
+	single { CloudflareAccessAuthManager(get()) }
+	single {
+		OkHttpFactory(
+			base = okhttp3.OkHttpClient.Builder()
+				.cookieJar(get<CloudflareAccessAuthManager>().createCookieJar())
+				.addInterceptor(get<CloudflareAccessAuthManager>().createRequestInterceptor())
+				.build()
+		)
+	}
 	single { HttpClientOptions() }
 	single {
 		createJellyfin {
