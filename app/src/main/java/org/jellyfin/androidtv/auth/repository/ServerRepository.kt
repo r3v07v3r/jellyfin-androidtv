@@ -12,10 +12,12 @@ import kotlinx.coroutines.withContext
 import org.jellyfin.androidtv.auth.model.AuthenticationStoreServer
 import org.jellyfin.androidtv.auth.model.ConnectedState
 import org.jellyfin.androidtv.auth.model.ConnectingState
+import org.jellyfin.androidtv.auth.model.CloudflareAccessRequiredState
 import org.jellyfin.androidtv.auth.model.Server
 import org.jellyfin.androidtv.auth.model.ServerAdditionState
 import org.jellyfin.androidtv.auth.model.UnableToConnectState
 import org.jellyfin.androidtv.auth.store.AuthenticationStore
+import org.jellyfin.androidtv.cloudflare.CloudflareAccessAuthManager
 import org.jellyfin.androidtv.util.sdk.toServer
 import org.jellyfin.sdk.Jellyfin
 import org.jellyfin.sdk.api.client.ApiClient
@@ -62,6 +64,7 @@ interface ServerRepository {
 class ServerRepositoryImpl(
 	private val jellyfin: Jellyfin,
 	private val authenticationStore: AuthenticationStore,
+	private val cloudflareAccessAuthManager: CloudflareAccessAuthManager,
 ) : ServerRepository {
 	// State
 	private val _storedServers = MutableStateFlow(emptyList<Server>())
@@ -167,6 +170,14 @@ class ServerRepositoryImpl(
 
 			emit(ConnectedState(id, systemInfo))
 		} else {
+			val cloudflareChallenge = (listOf(address) + addressCandidates).firstNotNullOfOrNull { candidate ->
+				cloudflareAccessAuthManager.startLoginFlow(candidate)
+			}
+			if (cloudflareChallenge != null) {
+				emit(CloudflareAccessRequiredState(cloudflareChallenge.serverUrl, cloudflareChallenge.loginUrl))
+				return@flow
+			}
+
 			// No great or good recommendations, only add bad recommendations
 			val addressCandidatesWithIssues = (badRecommendations + goodRecommendations)
 				.groupBy { it.address }
