@@ -298,6 +298,11 @@
     <string name="server_connecting">Connecting to %1$s</string>
     <string name="server_connection_failed">Unable to connect to server</string>
     <string name="server_connection_failed_candidates">Unable to connect to server, tried the following addresses: %1$s</string>
+    <string name="cloudflare_access_sign_in_required">Cloudflare Access sign-in required</string>
+    <string name="cloudflare_access_sign_in">Sign in with Cloudflare Access</string>
+    <string name="cloudflare_access_server_protected">This server is protected by Cloudflare Access. Sign in to continue.</string>
+    <string name="cloudflare_access_session_expired">Cloudflare session expired. Please sign in again.</string>
+    <string name="cloudflare_access_clear_session">Clear Cloudflare Access session</string>
     <string name="server_field_empty">The address cannot be empty</string>
     <string name="login_authenticating">Authenticating…</string>
     <string name="login_invalid_credentials">Invalid username and/or password</string>
